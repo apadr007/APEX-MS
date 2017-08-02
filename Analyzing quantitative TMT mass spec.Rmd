@@ -1,0 +1,63 @@
+---
+title: "Analyzing Quantitative TMT Mass Spec"
+author: "Alex Padron"
+date: "8/2/2017"
+output: html_document
+---
+
+Here I walk through loading and cleaning up Proteome Discoverer output for DESeq analysis. The example I highlight below uses data from an APEX-eIF4A vs APEX-GFP TMT experiment.
+
+```{r}
+proteins.filtered <- read.table('~/APEX/high_pH/high.ph__Proteins.txt', header=TRUE)
+p <- proteins.filtered
+p <- data.frame(GFP1=p$Abundances..Normalized...F1..129..Sample , GFP2=p$Abundances..Normalized...F1..130..Sample, A4A1=p$Abundances..Normalized...F1..127..Sample, A4A2=p$Abundances..Normalized...F1..128..Sample)
+row.names(p) <- proteins.filtered$Accession
+p = p[complete.cases(p), ]
+p <- round(p)
+```
+
+To proceed further your input file should look like this
+
+```{r}
+head(p)
+```
+
+
+Perform DESeq analysis and estimate dispersion. 
+
+```{r}
+#Load DESeq
+library(DESeq)
+
+#set up conditions. Untreated = GFP, Treated = 4A
+condit = data.frame(samples = c('untreated','untreated', 'treated', 'treated'))
+prots <-newCountDataSet(p, condit$samples)
+prots <-estimateSizeFactors(prots)
+#If you're inputting unnormalized peptide or protein counts, sizeFactors should not be set to 1. 
+sizeFactors(prots) <- 1
+
+head(counts(prots, normalized=TRUE))
+
+prots <- estimateDispersions(prots, method='pooled',sharingMode='fit-only', fitType='parametric')
+
+# Display dispersion estimate
+plotDispEsts(prots)
+
+#Perform a negative binomial test with the dispersion estimates, and extract annotation features
+APEX4A.nbinom <-nbinomTest(prots, 'untreated', 'treated')
+APEX4A.nbinom$GeneID <- proteins.filtered$Gene.ID[match(APEX4A.nbinom$id, proteins.filtered$Accession) ]
+APEX4A.nbinom$Description <- proteins.filtered$Description[match(APEX4A.nbinom$id, proteins.filtered$Accession) ]
+APEX4A.nbinom$Ensembl <- proteins.filtered$Ensembl.Gene.ID[match(APEX4A.nbinom$id, proteins.filtered$Accession) ]
+head(APEX4A.nbinom)
+
+# Assess fold change between conditions as a function of mean normalized abundance
+
+library(RColorBrewer)
+cols = brewer.pal(12, "Paired")
+
+plot(APEX4A.nbinom$baseMean,APEX4A.nbinom$log2FoldChange, log="x", 
+     ylab="Fold change by APEX-4A [log2]",
+     xlab="Abundance", cex=0.45 ,
+     pch=20,col=ifelse(APEX4A.nbinom$padj>0.01, "gray", cols[1]))
+```
+
